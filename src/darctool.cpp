@@ -3,19 +3,22 @@
 
 CDarcTool::SOption CDarcTool::s_Option[] =
 {
-	{ "extract", 'x', "extract the darc file" },
-	{ "create", 'c', "create the darc file" },
-	{ "file", 'f', "the darc file" },
-	{ "dir", 'd', "the dir for the darc file" },
-	{ "verbose", 'v', "show the info" },
-	{ "help", 'h', "show this help" },
+	{ USTR("extract"), USTR('x'), USTR("extract the darc file") },
+	{ USTR("create"), USTR('c'), USTR("create the darc file") },
+	{ USTR("file"), USTR('f'), USTR("the darc file") },
+	{ USTR("dir"), USTR('d'), USTR("the dir for the darc file") },
+	{ USTR("shared-alignment"), USTR('a'), USTR("the shared alignment, default is 32") },
+	{ USTR("unique-alignment"), USTR('r'), USTR("the path regex pattern and the unique alignment") },
+	{ USTR("exclude-root"), USTR('e'), USTR("exclude the root dot dir") },
+	{ USTR("verbose"), USTR('v'), USTR("show the info") },
+	{ USTR("help"), USTR('h'), USTR("show this help") },
 	{ nullptr, 0, nullptr }
 };
 
 CDarcTool::CDarcTool()
 	: m_eAction(kActionNone)
-	, m_pFileName(nullptr)
-	, m_pDirName(nullptr)
+	, m_nSharedAlignment(32)
+	, m_bExcludeRoot(false)
 	, m_bVerbose(false)
 {
 }
@@ -24,7 +27,7 @@ CDarcTool::~CDarcTool()
 {
 }
 
-int CDarcTool::ParseOptions(int a_nArgc, char* a_pArgv[])
+int CDarcTool::ParseOptions(int a_nArgc, UChar* a_pArgv[])
 {
 	if (a_nArgc <= 1)
 	{
@@ -32,14 +35,18 @@ int CDarcTool::ParseOptions(int a_nArgc, char* a_pArgv[])
 	}
 	for (int i = 1; i < a_nArgc; i++)
 	{
-		int nArgpc = static_cast<int>(strlen(a_pArgv[i]));
-		int nIndex = i;
-		if (a_pArgv[i][0] != '-')
+		int nArgpc = static_cast<int>(UCslen(a_pArgv[i]));
+		if (nArgpc == 0)
 		{
-			printf("ERROR: illegal option\n\n");
+			continue;
+		}
+		int nIndex = i;
+		if (a_pArgv[i][0] != USTR('-'))
+		{
+			UPrintf(USTR("ERROR: illegal option\n\n"));
 			return 1;
 		}
-		else if (nArgpc > 1 && a_pArgv[i][1] != '-')
+		else if (nArgpc > 1 && a_pArgv[i][1] != USTR('-'))
 		{
 			for (int j = 1; j < nArgpc; j++)
 			{
@@ -48,31 +55,37 @@ int CDarcTool::ParseOptions(int a_nArgc, char* a_pArgv[])
 				case kParseOptionReturnSuccess:
 					break;
 				case kParseOptionReturnIllegalOption:
-					printf("ERROR: illegal option\n\n");
+					UPrintf(USTR("ERROR: illegal option\n\n"));
 					return 1;
 				case kParseOptionReturnNoArgument:
-					printf("ERROR: no argument\n\n");
+					UPrintf(USTR("ERROR: no argument\n\n"));
+					return 1;
+				case kParseOptionReturnUnknownArgument:
+					UPrintf(USTR("ERROR: unknown argument \"%") PRIUS USTR("\"\n\n"), m_sMessage.c_str());
 					return 1;
 				case kParseOptionReturnOptionConflict:
-					printf("ERROR: option conflict\n\n");
+					UPrintf(USTR("ERROR: option conflict\n\n"));
 					return 1;
 				}
 			}
 		}
-		else if (nArgpc > 2 && a_pArgv[i][1] == '-')
+		else if (nArgpc > 2 && a_pArgv[i][1] == USTR('-'))
 		{
 			switch (parseOptions(a_pArgv[i] + 2, nIndex, a_nArgc, a_pArgv))
 			{
 			case kParseOptionReturnSuccess:
 				break;
 			case kParseOptionReturnIllegalOption:
-				printf("ERROR: illegal option\n\n");
+				UPrintf(USTR("ERROR: illegal option\n\n"));
 				return 1;
 			case kParseOptionReturnNoArgument:
-				printf("ERROR: no argument\n\n");
+				UPrintf(USTR("ERROR: no argument\n\n"));
+				return 1;
+			case kParseOptionReturnUnknownArgument:
+				UPrintf(USTR("ERROR: unknown argument \"%") PRIUS USTR("\"\n\n"), m_sMessage.c_str());
 				return 1;
 			case kParseOptionReturnOptionConflict:
-				printf("ERROR: option conflict\n\n");
+				UPrintf(USTR("ERROR: option conflict\n\n"));
 				return 1;
 			}
 		}
@@ -85,27 +98,27 @@ int CDarcTool::CheckOptions()
 {
 	if (m_eAction == kActionNone)
 	{
-		printf("ERROR: nothing to do\n\n");
+		UPrintf(USTR("ERROR: nothing to do\n\n"));
 		return 1;
 	}
 	if (m_eAction != kActionHelp)
 	{
-		if (m_pFileName == nullptr)
+		if (m_sFileName.empty())
 		{
-			printf("ERROR: no --file option\n\n");
+			UPrintf(USTR("ERROR: no --file option\n\n"));
 			return 1;
 		}
-		if (m_pDirName == nullptr)
+		if (m_sDirName.empty())
 		{
-			printf("ERROR: no --dir option\n\n");
+			UPrintf(USTR("ERROR: no --dir option\n\n"));
 			return 1;
 		}
 	}
 	if (m_eAction == kActionExtract)
 	{
-		if (!CDarc::IsDarcFile(m_pFileName))
+		if (!CDarc::IsDarcFile(m_sFileName))
 		{
-			printf("ERROR: %s is not a darc file\n\n", m_pFileName);
+			UPrintf(USTR("ERROR: %") PRIUS USTR(" is not a darc file\n\n"), m_sFileName.c_str());
 			return 1;
 		}
 	}
@@ -114,38 +127,40 @@ int CDarcTool::CheckOptions()
 
 int CDarcTool::Help()
 {
-	printf("darctool %s by dnasdw\n\n", DARCTOOL_VERSION);
-	printf("usage: darctool [option...] [option]...\n");
-	printf("sample:\n");
-	printf("  darctool -xvfd input.darc outputdir\n");
-	printf("  darctool -cvfd output.darc inputdir\n");
-	printf("\n");
-	printf("option:\n");
+	UPrintf(USTR("darctool %") PRIUS USTR(" by dnasdw\n\n"), AToU(DARCTOOL_VERSION).c_str());
+	UPrintf(USTR("usage: darctool [option...] [option]...\n\n"));
+	UPrintf(USTR("sample:\n"));
+	UPrintf(USTR("  darctool -xvfd input.darc outputdir\n"));
+	UPrintf(USTR("  darctool -cvfd output.darc inputdir\n"));
+	UPrintf(USTR("  darctool -cvfd output.darc inputdir -a 4 -r \\.bclim 128 -r \\.bcfnt 128 -r \\.bcfna 128\n"));
+	UPrintf(USTR("  darctool -cvfd output.darc inputdir --exclude-root\n"));
+	UPrintf(USTR("\n"));
+	UPrintf(USTR("option:\n"));
 	SOption* pOption = s_Option;
 	while (pOption->Name != nullptr || pOption->Doc != nullptr)
 	{
 		if (pOption->Name != nullptr)
 		{
-			printf("  ");
+			UPrintf(USTR("  "));
 			if (pOption->Key != 0)
 			{
-				printf("-%c,", pOption->Key);
+				UPrintf(USTR("-%c,"), pOption->Key);
 			}
 			else
 			{
-				printf("   ");
+				UPrintf(USTR("   "));
 			}
-			printf(" --%-8s", pOption->Name);
-			if (strlen(pOption->Name) >= 8 && pOption->Doc != nullptr)
+			UPrintf(USTR(" --%-8") PRIUS, pOption->Name);
+			if (UCslen(pOption->Name) >= 8 && pOption->Doc != nullptr)
 			{
-				printf("\n%16s", "");
+				UPrintf(USTR("\n%16") PRIUS, USTR(""));
 			}
 		}
 		if (pOption->Doc != nullptr)
 		{
-			printf("%s", pOption->Doc);
+			UPrintf(USTR("%") PRIUS, pOption->Doc);
 		}
-		printf("\n");
+		UPrintf(USTR("\n"));
 		pOption++;
 	}
 	return 0;
@@ -157,7 +172,7 @@ int CDarcTool::Action()
 	{
 		if (!extractFile())
 		{
-			printf("ERROR: extract file failed\n\n");
+			UPrintf(USTR("ERROR: extract file failed\n\n"));
 			return 1;
 		}
 	}
@@ -165,7 +180,7 @@ int CDarcTool::Action()
 	{
 		if (!createFile())
 		{
-			printf("ERROR: create file failed\n\n");
+			UPrintf(USTR("ERROR: create file failed\n\n"));
 			return 1;
 		}
 	}
@@ -176,9 +191,9 @@ int CDarcTool::Action()
 	return 0;
 }
 
-CDarcTool::EParseOptionReturn CDarcTool::parseOptions(const char* a_pName, int& a_nIndex, int a_nArgc, char* a_pArgv[])
+CDarcTool::EParseOptionReturn CDarcTool::parseOptions(const UChar* a_pName, int& a_nIndex, int a_nArgc, UChar* a_pArgv[])
 {
-	if (strcmp(a_pName, "extract") == 0)
+	if (UCscmp(a_pName, USTR("extract")) == 0)
 	{
 		if (m_eAction == kActionNone)
 		{
@@ -189,7 +204,7 @@ CDarcTool::EParseOptionReturn CDarcTool::parseOptions(const char* a_pName, int& 
 			return kParseOptionReturnOptionConflict;
 		}
 	}
-	else if (strcmp(a_pName, "create") == 0)
+	else if (UCscmp(a_pName, USTR("create")) == 0)
 	{
 		if (m_eAction == kActionNone)
 		{
@@ -200,34 +215,79 @@ CDarcTool::EParseOptionReturn CDarcTool::parseOptions(const char* a_pName, int& 
 			return kParseOptionReturnOptionConflict;
 		}
 	}
-	else if (strcmp(a_pName, "file") == 0)
+	else if (UCscmp(a_pName, USTR("file")) == 0)
 	{
 		if (a_nIndex + 1 >= a_nArgc)
 		{
 			return kParseOptionReturnNoArgument;
 		}
-		m_pFileName = a_pArgv[++a_nIndex];
+		m_sFileName = a_pArgv[++a_nIndex];
 	}
-	else if (strcmp(a_pName, "dir") == 0)
+	else if (UCscmp(a_pName, USTR("dir")) == 0)
 	{
 		if (a_nIndex + 1 >= a_nArgc)
 		{
 			return kParseOptionReturnNoArgument;
 		}
-		m_pDirName = a_pArgv[++a_nIndex];
+		m_sDirName = a_pArgv[++a_nIndex];
 	}
-	else if (strcmp(a_pName, "verbose") == 0)
+	else if (UCscmp(a_pName, USTR("shared-alignment")) == 0)
+	{
+		if (a_nIndex + 1 >= a_nArgc)
+		{
+			return kParseOptionReturnNoArgument;
+		}
+		UString sSharedAlignment = a_pArgv[++a_nIndex];
+		n32 nSharedAlignment = SToN32(sSharedAlignment);
+		if (nSharedAlignment < 1)
+		{
+			m_sMessage = sSharedAlignment;
+			return kParseOptionReturnUnknownArgument;
+		}
+		m_nSharedAlignment = nSharedAlignment;
+	}
+	else if (UCscmp(a_pName, USTR("unique-alignment")) == 0)
+	{
+		if (a_nIndex + 2 >= a_nArgc)
+		{
+			return kParseOptionReturnNoArgument;
+		}
+		UString sPattern = a_pArgv[++a_nIndex];
+		UString sUniqueAlignment = a_pArgv[++a_nIndex];
+		n32 nUniqueAlignment = SToN32(sUniqueAlignment);
+		if (nUniqueAlignment < 1)
+		{
+			m_sMessage = sUniqueAlignment;
+			return kParseOptionReturnUnknownArgument;
+		}
+		try
+		{
+			URegex rPattern(sPattern, regex_constants::ECMAScript | regex_constants::icase);
+			m_mUniqueAlignment[nUniqueAlignment].push_back(rPattern);
+		}
+		catch (regex_error& e)
+		{
+			UPrintf(USTR("ERROR: %") PRIUS USTR("\n\n"), AToU(e.what()).c_str());
+			m_sMessage = sPattern;
+			return kParseOptionReturnUnknownArgument;
+		}
+	}
+	else if (UCscmp(a_pName, USTR("exclude-root")) == 0)
+	{
+		m_bExcludeRoot = true;
+	}
+	else if (UCscmp(a_pName, USTR("verbose")) == 0)
 	{
 		m_bVerbose = true;
 	}
-	else if (strcmp(a_pName, "help") == 0)
+	else if (UCscmp(a_pName, USTR("help")) == 0)
 	{
 		m_eAction = kActionHelp;
 	}
 	return kParseOptionReturnSuccess;
 }
 
-CDarcTool::EParseOptionReturn CDarcTool::parseOptions(int a_nKey, int& a_nIndex, int m_nArgc, char* a_pArgv[])
+CDarcTool::EParseOptionReturn CDarcTool::parseOptions(int a_nKey, int& a_nIndex, int m_nArgc, UChar* a_pArgv[])
 {
 	for (SOption* pOption = s_Option; pOption->Name != nullptr || pOption->Key != 0 || pOption->Doc != nullptr; pOption++)
 	{
@@ -242,8 +302,8 @@ CDarcTool::EParseOptionReturn CDarcTool::parseOptions(int a_nKey, int& a_nIndex,
 bool CDarcTool::extractFile()
 {
 	CDarc darc;
-	darc.SetFileName(m_pFileName);
-	darc.SetDirName(m_pDirName);
+	darc.SetFileName(m_sFileName);
+	darc.SetDirName(m_sDirName);
 	darc.SetVerbose(m_bVerbose);
 	return darc.ExtractFile();
 }
@@ -251,15 +311,17 @@ bool CDarcTool::extractFile()
 bool CDarcTool::createFile()
 {
 	CDarc darc;
-	darc.SetFileName(m_pFileName);
-	darc.SetDirName(m_pDirName);
+	darc.SetFileName(m_sFileName);
+	darc.SetDirName(m_sDirName);
+	darc.SetSharedAlignment(m_nSharedAlignment);
+	darc.SetUniqueAlignment(m_mUniqueAlignment);
+	darc.SetExcludeRoot(m_bExcludeRoot);
 	darc.SetVerbose(m_bVerbose);
 	return darc.CreateFile();
 }
 
-int main(int argc, char* argv[])
+int UMain(int argc, UChar* argv[])
 {
-	FSetLocale();
 	CDarcTool tool;
 	if (tool.ParseOptions(argc, argv) != 0)
 	{

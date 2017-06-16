@@ -5,28 +5,36 @@ A tool for extracting/creating darc file.
 ## History
 
 - v1.0.0 @ 2015.03.02 - First release
+- v1.0.1 @ 2017.06.16 - Refactoring
 
 ## Platforms
 
-- Cygwin *1.7.34*
-- Linux *(Ubuntu 14.04, CentOS 7.0)*
-- Mac OS X *10.10*
-- Windows *XP+*
+- Windows
+- Linux
+- macOS
 
 ## Building
 
 ### Dependencies
 
 - cmake
-- libiconv **(linux only)**
+- libiconv
 
 ### Compiling
 
+- make 64-bit version
 ~~~
 mkdir project
 cd project
 cmake ..
-cmake ..
+make
+~~~
+
+- make 32-bit version
+~~~
+mkdir project
+cd project
+cmake -DBUILD64=OFF ..
 make
 ~~~
 
@@ -38,24 +46,10 @@ make install
 
 ## Usage
 
-### Windows
-
-~~~
-darctool.exe [option...] [option]...
-~~~
-
-### Other
-
 ~~~
 darctool [option...] [option]...
 ~~~
 
-> Remember to do `chmod +x darctool` first
-
 ## Options
 
 See `darctool --help` messages.
-
-## FAQ
-
-Nothing here for now.

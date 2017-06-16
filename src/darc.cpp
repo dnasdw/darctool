@@ -1,12 +1,11 @@
 #include "darc.h"
 
-const u32 CDarc::s_uSignature = CONVERT_ENDIAN('darc');
+const u32 CDarc::s_uSignature = SDW_CONVERT_ENDIAN32('darc');
 const n32 CDarc::s_nInvalidOffset = -1;
-const int CDarc::s_nEntryAlignment4 = 4;
-const int CDarc::s_nEntryAlignment128 = 128;
 
 CDarc::CDarc()
-	: m_pFileName(nullptr)
+	: m_nSharedAlignment(32)
+	, m_bExcludeRoot(false)
 	, m_bVerbose(false)
 	, m_fpDarc(nullptr)
 	, m_nEntryCount(0)
@@ -18,14 +17,29 @@ CDarc::~CDarc()
 {
 }
 
-void CDarc::SetFileName(const char* a_pFileName)
+void CDarc::SetFileName(const UString& a_sFileName)
 {
-	m_pFileName = a_pFileName;
+	m_sFileName = a_sFileName;
 }
 
-void CDarc::SetDirName(const char* a_pRomFsDirName)
+void CDarc::SetDirName(const UString& a_sDirName)
 {
-	m_sDirName = FSAToUnicode(a_pRomFsDirName);
+	m_sDirName = a_sDirName;
+}
+
+void CDarc::SetSharedAlignment(n32 a_nSharedAlignment)
+{
+	m_nSharedAlignment = a_nSharedAlignment;
+}
+
+void CDarc::SetUniqueAlignment(const map<n32, vector<URegex>>& a_mUniqueAlignment)
+{
+	m_mUniqueAlignment = a_mUniqueAlignment;
+}
+
+void CDarc::SetExcludeRoot(bool a_bExcludeRoot)
+{
+	m_bExcludeRoot = a_bExcludeRoot;
 }
 
 void CDarc::SetVerbose(bool a_bVerbose)
@@ -36,22 +50,22 @@ void CDarc::SetVerbose(bool a_bVerbose)
 bool CDarc::ExtractFile()
 {
 	bool bResult = true;
-	m_fpDarc = FFopen(m_pFileName, "rb");
+	m_fpDarc = UFopen(m_sFileName.c_str(), USTR("rb"));
 	if (m_fpDarc == nullptr)
 	{
 		return false;
 	}
 	fread(&m_DarcHeader, sizeof(m_DarcHeader), 1, m_fpDarc);
-	FFseek(m_fpDarc, m_DarcHeader.EntryOffset, SEEK_SET);
+	Fseek(m_fpDarc, m_DarcHeader.EntryOffset, SEEK_SET);
 	SCommonEntry rootEntry;
 	fread(&rootEntry, sizeof(rootEntry), 1, m_fpDarc);
 	m_nEntryCount = rootEntry.Entry.Dir.SiblingDirOffset;
 	n32 nNameOffset = m_DarcHeader.EntryOffset + m_nEntryCount * sizeof(SCommonEntry);
-	n32 nNameSize = (m_DarcHeader.EntryOffset + m_DarcHeader.EntrySize - nNameOffset) / sizeof(char16_t);
+	n32 nNameSize = (m_DarcHeader.EntryOffset + m_DarcHeader.EntrySize - nNameOffset) / 2;
 	m_vEntryName.resize(nNameSize);
-	FFseek(m_fpDarc, nNameOffset, SEEK_SET);
-	fread(&*m_vEntryName.begin(), sizeof(char16_t), nNameSize, m_fpDarc);
-	pushExtractStackElement(0, m_nEntryCount, STR("/"));
+	Fseek(m_fpDarc, nNameOffset, SEEK_SET);
+	fread(&*m_vEntryName.begin(), 2, nNameSize, m_fpDarc);
+	pushExtractStackElement(0, m_nEntryCount, USTR("/"));
 	while (!m_sExtractStack.empty())
 	{
 		SExtractStackElement& current = m_sExtractStack.top();
@@ -75,10 +89,12 @@ bool CDarc::CreateFile()
 {
 	bool bResult = true;
 	setupCreate();
-	buildBlackList();
-	buildAlignList();
-	insertDirEntry(0, STR(""), 0);
-	insertDirEntry(1, STR("."), 0);
+	buildIgnoreList();
+	insertDirEntry(0, USTR(""), 0);
+	if (!m_bExcludeRoot)
+	{
+		insertDirEntry(1, USTR("."), 0);
+	}
 	pushCreateDequeElement(0);
 	while (!m_dCreateDeque.empty())
 	{
@@ -90,12 +106,12 @@ bool CDarc::CreateFile()
 	redirectSiblingDirOffset();
 	createEntryName();
 	calculateFileOffset();
-	m_fpDarc = FFopen(m_pFileName, "wb");
+	m_fpDarc = UFopen(m_sFileName.c_str(), USTR("wb"));
 	if (m_fpDarc == nullptr)
 	{
 		return false;
 	}
-	FSeek(m_fpDarc, m_DarcHeader.FileSize);
+	Seek(m_fpDarc, m_DarcHeader.FileSize);
 	writeHeader();
 	writeEntry();
 	if (!writeData())
@@ -106,9 +122,9 @@ bool CDarc::CreateFile()
 	return bResult;
 }
 
-bool CDarc::IsDarcFile(const char* a_pFileName)
+bool CDarc::IsDarcFile(const UString& a_sFileName)
 {
-	FILE* fp = FFopen(a_pFileName, "rb");
+	FILE* fp = UFopen(a_sFileName.c_str(), USTR("rb"));
 	if (fp == nullptr)
 	{
 		return false;
@@ -119,18 +135,18 @@ bool CDarc::IsDarcFile(const char* a_pFileName)
 	return darcHeader.Signature == s_uSignature;
 }
 
-void CDarc::pushExtractStackElement(n32 a_nEntryOffset, n32 a_nParentSiblingDirOffset, const String& a_sPrefix)
+void CDarc::pushExtractStackElement(n32 a_nEntryOffset, n32 a_nParentSiblingDirOffset, const UString& a_sPrefix)
 {
 	if (a_nEntryOffset != m_nEntryCount)
 	{
 		m_sExtractStack.push(SExtractStackElement());
 		SExtractStackElement& current = m_sExtractStack.top();
 		current.EntryOffset = a_nEntryOffset;
-		FFseek(m_fpDarc, m_DarcHeader.EntryOffset + current.EntryOffset * sizeof(SCommonEntry), SEEK_SET);
+		Fseek(m_fpDarc, m_DarcHeader.EntryOffset + current.EntryOffset * sizeof(SCommonEntry), SEEK_SET);
 		fread(&current.Entry, sizeof(current.Entry), 1, m_fpDarc);
 		current.IsDir = (current.Entry.NameOffset & 0xFF000000) != 0;
 		current.Entry.NameOffset &= 0xFFFFFF;
-		current.EntryName = FSU16ToUnicode(reinterpret_cast<char16_t*>(reinterpret_cast<u8*>(&*m_vEntryName.begin()) + current.Entry.NameOffset));
+		current.EntryName = U16ToU(reinterpret_cast<Char16_t*>(reinterpret_cast<u8*>(&*m_vEntryName.begin()) + current.Entry.NameOffset));
 		current.ParentSiblingDirOffset = a_nParentSiblingDirOffset;
 		current.Prefix = a_sPrefix;
 		current.ExtractState = kExtractStateBegin;
@@ -142,11 +158,11 @@ bool CDarc::extractDirEntry()
 	SExtractStackElement& current = m_sExtractStack.top();
 	if (current.ExtractState == kExtractStateBegin)
 	{
-		String sPrefix = current.Prefix;
-		String sDirName = m_sDirName + sPrefix;
-		if (current.EntryName != STR(""))
+		UString sPrefix = current.Prefix;
+		UString sDirName = m_sDirName + sPrefix;
+		if (current.EntryName != USTR(""))
 		{
-			sPrefix += current.EntryName + STR("/");
+			sPrefix += current.EntryName + USTR("/");
 			sDirName += current.EntryName;
 		}
 		else
@@ -155,9 +171,9 @@ bool CDarc::extractDirEntry()
 		}
 		if (m_bVerbose)
 		{
-			FPrintf(STR("save: %s\n"), sDirName.c_str());
+			UPrintf(USTR("save: %") PRIUS USTR("\n"), sDirName.c_str());
 		}
-		if (!FMakeDir(sDirName.c_str()))
+		if (!UMakeDir(sDirName.c_str()))
 		{
 			m_sExtractStack.pop();
 			return false;
@@ -206,8 +222,8 @@ bool CDarc::extractFileEntry()
 	SExtractStackElement& current = m_sExtractStack.top();
 	if (current.ExtractState == kExtractStateBegin)
 	{
-		String sPath = m_sDirName + current.Prefix + current.EntryName;
-		FILE* fp = FFopenUnicode(sPath.c_str(), STR("wb"));
+		UString sPath = m_sDirName + current.Prefix + current.EntryName;
+		FILE* fp = UFopen(sPath.c_str(), USTR("wb"));
 		if (fp == nullptr)
 		{
 			bResult = false;
@@ -216,9 +232,9 @@ bool CDarc::extractFileEntry()
 		{
 			if (m_bVerbose)
 			{
-				FPrintf(STR("save: %s\n"), sPath.c_str());
+				UPrintf(USTR("save: %") PRIUS USTR("\n"), sPath.c_str());
 			}
-			FCopyFile(fp, m_fpDarc, current.Entry.Entry.File.FileOffset, current.Entry.Entry.File.FileSize);
+			CopyFile(fp, m_fpDarc, current.Entry.Entry.File.FileOffset, current.Entry.Entry.File.FileSize);
 			fclose(fp);
 		}
 		if (current.EntryOffset + 1 == m_nEntryCount)
@@ -243,7 +259,6 @@ bool CDarc::extractFileEntry()
 
 void CDarc::setupCreate()
 {
-	memset(&m_DarcHeader, 0, sizeof(m_DarcHeader));
 	m_DarcHeader.Signature = s_uSignature;
 	m_DarcHeader.ByteOrder = 0xFEFF;
 	m_DarcHeader.HeaderSize = sizeof(m_DarcHeader);
@@ -251,92 +266,56 @@ void CDarc::setupCreate()
 	m_DarcHeader.EntryOffset = m_DarcHeader.HeaderSize;
 }
 
-void CDarc::buildBlackList()
+void CDarc::buildIgnoreList()
 {
-	m_vBlackList.clear();
-	String sIgnorePath = FGetModuleDir() + STR("/ignore_darc.txt");
-	FILE* fp = FFopenUnicode(sIgnorePath.c_str(), STR("rb"));
+	m_vIgnoreList.clear();
+	UString sIgnorePath = UGetModuleDirName() + USTR("/ignore_darctool.txt");
+	FILE* fp = UFopen(sIgnorePath.c_str(), USTR("rb"));
 	if (fp != nullptr)
 	{
-		FFseek(fp, 0, SEEK_END);
-		u32 nSize = static_cast<u32>(FFtell(fp));
-		FFseek(fp, 0, SEEK_SET);
-		char* pTxt = new char[nSize + 1];
-		fread(pTxt, 1, nSize, fp);
+		Fseek(fp, 0, SEEK_END);
+		u32 uSize = static_cast<u32>(Ftell(fp));
+		Fseek(fp, 0, SEEK_SET);
+		char* pTxt = new char[uSize + 1];
+		fread(pTxt, 1, uSize, fp);
 		fclose(fp);
-		pTxt[nSize] = '\0';
+		pTxt[uSize] = '\0';
 		string sTxt(pTxt);
 		delete[] pTxt;
-		vector<string> vTxt = FSSplitOf<string>(sTxt, "\r\n");
-		for (auto it = vTxt.begin(); it != vTxt.end(); ++it)
+		vector<string> vTxt = SplitOf(sTxt, "\r\n");
+		for (vector<string>::const_iterator it = vTxt.begin(); it != vTxt.end(); ++it)
 		{
-			sTxt = FSTrim(*it);
-			if (!sTxt.empty() && !FSStartsWith<string>(sTxt, "//"))
+			sTxt = Trim(*it);
+			if (!sTxt.empty() && !StartWith(sTxt, "//"))
 			{
 				try
 				{
-					Regex black(FSAToUnicode(sTxt), regex_constants::ECMAScript | regex_constants::icase);
-					m_vBlackList.push_back(black);
+					URegex black(AToU(sTxt), regex_constants::ECMAScript | regex_constants::icase);
+					m_vIgnoreList.push_back(black);
 				}
 				catch (regex_error& e)
 				{
-					printf("ERROR: %s\n\n", e.what());
+					UPrintf(USTR("ERROR: %") PRIUS USTR("\n\n"), AToU(e.what()).c_str());
 				}
 			}
 		}
 	}
 }
 
-void CDarc::buildAlignList()
-{
-	m_vAlignList.clear();
-	String sAlignPath = FGetModuleDir() + STR("/align_darc.txt");
-	FILE* fp = FFopenUnicode(sAlignPath.c_str(), STR("rb"));
-	if (fp != nullptr)
-	{
-		FFseek(fp, 0, SEEK_END);
-		u32 nSize = static_cast<u32>(FFtell(fp));
-		FFseek(fp, 0, SEEK_SET);
-		char* pTxt = new char[nSize + 1];
-		fread(pTxt, 1, nSize, fp);
-		fclose(fp);
-		pTxt[nSize] = '\0';
-		string sTxt(pTxt);
-		delete[] pTxt;
-		vector<string> vTxt = FSSplitOf<string>(sTxt, "\r\n");
-		for (auto it = vTxt.begin(); it != vTxt.end(); ++it)
-		{
-			sTxt = FSTrim(*it);
-			if (!sTxt.empty() && !FSStartsWith<string>(sTxt, "//"))
-			{
-				try
-				{
-					Regex align(FSAToUnicode(sTxt), regex_constants::ECMAScript | regex_constants::icase);
-					m_vAlignList.push_back(align);
-				}
-				catch (regex_error& e)
-				{
-					printf("ERROR: %s\n\n", e.what());
-				}
-			}
-		}
-	}
-}
-
-void CDarc::insertDirEntry(n32 a_nEntryOffset, const String& a_sEntryName, n32 a_nParentDirOffset)
+void CDarc::insertDirEntry(n32 a_nEntryOffset, const UString& a_sEntryName, n32 a_nParentDirOffset)
 {
 	m_vCreateEntry.resize(m_vCreateEntry.size() + 1);
 	moveEntry(a_nEntryOffset);
 	SEntry& currentEntry = m_vCreateEntry[a_nEntryOffset];
-	if (a_nEntryOffset < 2)
+	if ((m_bExcludeRoot && a_nEntryOffset < 1) || (!m_bExcludeRoot && a_nEntryOffset < 2))
 	{
 		currentEntry.Path = m_sDirName;
 	}
 	else
 	{
-		currentEntry.Path = m_vCreateEntry[a_nParentDirOffset].Path + STR("/") + a_sEntryName;
+		currentEntry.Path = m_vCreateEntry[a_nParentDirOffset].Path + USTR("/") + a_sEntryName;
 	}
-	currentEntry.EntryName = FSUnicodeToU16(a_sEntryName);
+	currentEntry.EntryName = UToU16(a_sEntryName);
 	currentEntry.IsDir = true;
 	currentEntry.ChildCount = 0;
 	currentEntry.ChildDirOffset = s_nInvalidOffset;
@@ -349,23 +328,28 @@ void CDarc::insertDirEntry(n32 a_nEntryOffset, const String& a_sEntryName, n32 a
 	}
 }
 
-bool CDarc::insertFileEntry(n32 a_nEntryOffset, const String& a_sEntryName, n32 a_nParentDirOffset)
+bool CDarc::insertFileEntry(n32 a_nEntryOffset, const UString& a_sEntryName, n32 a_nParentDirOffset)
 {
 	bool bResult = true;
 	m_vCreateEntry.resize(m_vCreateEntry.size() + 1);
 	moveEntry(a_nEntryOffset);
 	SEntry& currentEntry = m_vCreateEntry[a_nEntryOffset];
-	currentEntry.Path = m_vCreateEntry[a_nParentDirOffset].Path + STR("/") + a_sEntryName;
-	currentEntry.EntryName = FSUnicodeToU16(a_sEntryName);
+	currentEntry.Path = m_vCreateEntry[a_nParentDirOffset].Path + USTR("/") + a_sEntryName;
+	currentEntry.EntryName = UToU16(a_sEntryName);
 	currentEntry.IsDir = false;
 	currentEntry.ChildCount = -1;
 	currentEntry.ChildDirOffset = s_nInvalidOffset;
 	currentEntry.Entry.NameOffset = s_nInvalidOffset;
 	currentEntry.Entry.Entry.File.FileOffset = s_nInvalidOffset;
-	if (!FGetFileSize32(currentEntry.Path.c_str(), currentEntry.Entry.Entry.File.FileSize))
+	n64 nFileSize = 0;
+	if (!UGetFileSize(currentEntry.Path.c_str(), nFileSize))
 	{
 		bResult = false;
-		FPrintf(STR("ERROR: %s stat error\n\n"), currentEntry.Path.c_str());
+		UPrintf(USTR("ERROR: %") PRIUS USTR(" stat error\n\n"), currentEntry.Path.c_str());
+	}
+	else
+	{
+		currentEntry.Entry.Entry.File.FileSize = static_cast<n32>(nFileSize);
 	}
 	return bResult;
 }
@@ -385,12 +369,12 @@ void CDarc::moveEntry(n32 a_nEntryOffset)
 			addDirOffset(m_vCreateEntry[i].Entry.Entry.Dir.SiblingDirOffset, a_nEntryOffset);
 		}
 	}
-	for (auto it = m_dCreateDeque.begin(); it != m_dCreateDeque.end(); ++it)
+	for (deque<SCreateDequeElement>::iterator it = m_dCreateDeque.begin(); it != m_dCreateDeque.end(); ++it)
 	{
 		SCreateDequeElement& current = *it;
-		for (auto it2 = current.ChildOffset.begin(); it2 != current.ChildOffset.end(); ++it2)
+		for (vector<n32>::iterator itOffset = current.ChildOffset.begin(); itOffset != current.ChildOffset.end(); ++itOffset)
 		{
-			n32& nOffset = *it2;
+			n32& nOffset = *itOffset;
 			addDirOffset(nOffset, a_nEntryOffset);
 		}
 	}
@@ -409,7 +393,7 @@ void CDarc::pushCreateDequeElement(n32 a_nEntryOffset)
 	m_dCreateDeque.push_back(SCreateDequeElement());
 	SCreateDequeElement& current = m_dCreateDeque.back();
 	current.EntryOffset = a_nEntryOffset;
-	if (a_nEntryOffset == 0)
+	if (!m_bExcludeRoot && a_nEntryOffset == 0)
 	{
 		current.ChildOffset.push_back(1);
 		current.ChildIndex = 0;
@@ -426,33 +410,33 @@ bool CDarc::createEntryList()
 	SCreateDequeElement& current = m_dCreateDeque.back();
 	if (current.ChildIndex == -1)
 	{
-#if DARCTOOL_COMPILER == COMPILER_MSC
+#if SDW_PLATFORM == SDW_PLATFORM_WINDOWS
 		WIN32_FIND_DATAW ffd;
 		HANDLE hFind = INVALID_HANDLE_VALUE;
 		wstring sPattern = m_vCreateEntry[current.EntryOffset].Path + L"/*";
 		hFind = FindFirstFileW(sPattern.c_str(), &ffd);
 		if (hFind != INVALID_HANDLE_VALUE)
 		{
-			map<String, String> mDir;
-			map<String, String> mFile;
+			map<wstring, wstring> mDir;
+			map<wstring, wstring> mFile;
 			do
 			{
-				if (matchInBlackList(m_vCreateEntry[current.EntryOffset].Path.substr(m_sDirName.size()) + STR("/") + ffd.cFileName))
+				if (matchInIgnoreList(m_vCreateEntry[current.EntryOffset].Path.substr(m_sDirName.size()) + L"/" + ffd.cFileName))
 				{
 					continue;
 				}
-				String nameUpper = ffd.cFileName;
-				transform(nameUpper.begin(), nameUpper.end(), nameUpper.begin(), ::toupper);
+				wstring sNameUpper = ffd.cFileName;
+				transform(sNameUpper.begin(), sNameUpper.end(), sNameUpper.begin(), ::toupper);
 				if ((ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
 				{
-					mFile.insert(make_pair(nameUpper, ffd.cFileName));
+					mFile.insert(make_pair(sNameUpper, ffd.cFileName));
 				}
 				else if (wcscmp(ffd.cFileName, L".") != 0 && wcscmp(ffd.cFileName, L"..") != 0)
 				{
-					mDir.insert(make_pair(nameUpper, ffd.cFileName));
+					mDir.insert(make_pair(sNameUpper, ffd.cFileName));
 				}
 			} while (FindNextFileW(hFind, &ffd) != 0);
-			for (auto it = mFile.begin(); it != mFile.end(); ++it)
+			for (map<wstring, wstring>::const_iterator it = mFile.begin(); it != mFile.end(); ++it)
 			{
 				m_vCreateEntry[current.EntryOffset].ChildCount++;
 				if (!insertFileEntry(current.EntryOffset + m_vCreateEntry[current.EntryOffset].ChildCount, it->second, current.EntryOffset))
@@ -460,7 +444,7 @@ bool CDarc::createEntryList()
 					bResult = false;
 				}
 			}
-			for (auto it = mDir.begin(); it != mDir.end(); ++it)
+			for (map<wstring, wstring>::const_iterator it = mDir.begin(); it != mDir.end(); ++it)
 			{
 				m_vCreateEntry[current.EntryOffset].ChildCount++;
 				insertDirEntry(current.EntryOffset + m_vCreateEntry[current.EntryOffset].ChildCount, it->second, current.EntryOffset);
@@ -480,23 +464,23 @@ bool CDarc::createEntryList()
 			dirent* pDirent = nullptr;
 			while ((pDirent = readdir(pDir)) != nullptr)
 			{
-				if (matchInBlackList(m_vCreateEntry[current.EntryOffset].Path.substr(m_sDirName.size()) + STR("/") + pDirent->d_name))
+				if (matchInIgnoreList(m_vCreateEntry[current.EntryOffset].Path.substr(m_sDirName.size()) + "/" + pDirent->d_name))
 				{
 					continue;
 				}
-				string nameUpper = pDirent->d_name;
-				transform(nameUpper.begin(), nameUpper.end(), nameUpper.begin(), ::toupper);
+				string sNameUpper = pDirent->d_name;
+				transform(sNameUpper.begin(), sNameUpper.end(), sNameUpper.begin(), ::toupper);
 				if (pDirent->d_type == DT_REG)
 				{
-					mFile.insert(make_pair(nameUpper, pDirent->d_name));
+					mFile.insert(make_pair(sNameUpper, pDirent->d_name));
 				}
 				else if (pDirent->d_type == DT_DIR && strcmp(pDirent->d_name, ".") != 0 && strcmp(pDirent->d_name, "..") != 0)
 				{
-					mDir.insert(make_pair(nameUpper, pDirent->d_name));
+					mDir.insert(make_pair(sNameUpper, pDirent->d_name));
 				}
 			}
 			closedir(pDir);
-			for (auto it = mFile.begin(); it != mFile.end(); ++it)
+			for (map<string, string>::const_iterator it = mFile.begin(); it != mFile.end(); ++it)
 			{
 				m_vCreateEntry[current.EntryOffset].ChildCount++;
 				if (!insertFileEntry(current.EntryOffset + m_vCreateEntry[current.EntryOffset].ChildCount, it->second, current.EntryOffset))
@@ -504,7 +488,7 @@ bool CDarc::createEntryList()
 					bResult = false;
 				}
 			}
-			for (auto it = mDir.begin(); it != mDir.end(); ++it)
+			for (map<string, string>::const_iterator it = mDir.begin(); it != mDir.end(); ++it)
 			{
 				m_vCreateEntry[current.EntryOffset].ChildCount++;
 				insertDirEntry(current.EntryOffset + m_vCreateEntry[current.EntryOffset].ChildCount, it->second, current.EntryOffset);
@@ -529,10 +513,10 @@ bool CDarc::createEntryList()
 	return bResult;
 }
 
-bool CDarc::matchInBlackList(const String& a_sPath)
+bool CDarc::matchInIgnoreList(const UString& a_sPath) const
 {
 	bool bMatch = false;
-	for (auto it = m_vBlackList.begin(); it != m_vBlackList.end(); ++it)
+	for (vector<URegex>::const_iterator it = m_vIgnoreList.begin(); it != m_vIgnoreList.end(); ++it)
 	{
 		if (regex_search(a_sPath, *it))
 		{
@@ -547,7 +531,7 @@ void CDarc::redirectSiblingDirOffset()
 {
 	m_nEntryCount = static_cast<n32>(m_vCreateEntry.size());
 	m_vCreateEntry[0].Entry.Entry.Dir.SiblingDirOffset = m_nEntryCount;
-	for (auto it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
+	for (vector<SEntry>::iterator it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
 	{
 		SEntry& currentEntry = *it;
 		if (currentEntry.IsDir && currentEntry.Entry.Entry.Dir.SiblingDirOffset == s_nInvalidOffset)
@@ -559,46 +543,42 @@ void CDarc::redirectSiblingDirOffset()
 
 void CDarc::createEntryName()
 {
-	for (auto it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
+	for (vector<SEntry>::iterator it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
 	{
 		SEntry& currentEntry = *it;
-		currentEntry.Entry.NameOffset = static_cast<n32>(m_vEntryName.size() * sizeof(char16_t));
+		currentEntry.Entry.NameOffset = static_cast<n32>(m_vEntryName.size() * 2);
 		m_vEntryName.resize(m_vEntryName.size() + currentEntry.EntryName.size() + 1);
 		if (currentEntry.EntryName.size() != 0)
 		{
-			memcpy(reinterpret_cast<u8*>(&*m_vEntryName.begin()) + currentEntry.Entry.NameOffset, &*currentEntry.EntryName.begin(), currentEntry.EntryName.size() * sizeof(char16_t));
+			memcpy(reinterpret_cast<u8*>(&*m_vEntryName.begin()) + currentEntry.Entry.NameOffset, &*currentEntry.EntryName.begin(), currentEntry.EntryName.size() * 2);
 		}
 		if (currentEntry.IsDir)
 		{
 			currentEntry.Entry.NameOffset |= 0x01000000;
 		}
 	}
-	m_DarcHeader.EntrySize = static_cast<u32>(m_vCreateEntry.size() * sizeof(SCommonEntry) + m_vEntryName.size() * sizeof(char16_t));
-	m_DarcHeader.FileSize = static_cast<u32>(FAlign(m_DarcHeader.EntryOffset + m_DarcHeader.EntrySize, 4));
+	m_DarcHeader.EntrySize = static_cast<u32>(m_vCreateEntry.size() * sizeof(SCommonEntry) + m_vEntryName.size() * 2);
+	m_DarcHeader.FileSize = static_cast<u32>(Align(m_DarcHeader.EntryOffset + m_DarcHeader.EntrySize, 4));
 }
 
 void CDarc::calculateFileOffset()
 {
-	map<String, int> mFileOffset;
-	for (int i = 0; i < static_cast<int>(m_vCreateEntry.size()); i++)
+	map<UString, n32> mFileOffset;
+	for (n32 i = 0; i < static_cast<n32>(m_vCreateEntry.size()); i++)
 	{
 		SEntry& currentEntry = m_vCreateEntry[i];
 		if (!currentEntry.IsDir)
 		{
-			String nameUpper = currentEntry.Path;
-			transform(nameUpper.begin(), nameUpper.end(), nameUpper.begin(), ::toupper);
-			mFileOffset.insert(make_pair(nameUpper, i));
+			UString sNameUpper = currentEntry.Path;
+			transform(sNameUpper.begin(), sNameUpper.end(), sNameUpper.begin(), ::toupper);
+			mFileOffset.insert(make_pair(sNameUpper, i));
 		}
 	}
-	for (auto it = mFileOffset.begin(); it != mFileOffset.end(); ++it)
+	for (map<UString, n32>::iterator it = mFileOffset.begin(); it != mFileOffset.end(); ++it)
 	{
 		SEntry& currentEntry = m_vCreateEntry[it->second];
-		int nEntryAlignment = s_nEntryAlignment4;
-		if (matchInAlignList(currentEntry.Path.substr(m_sDirName.size())))
-		{
-			nEntryAlignment = s_nEntryAlignment128;
-		}
-		currentEntry.Entry.Entry.File.FileOffset = static_cast<n32>(FAlign(m_DarcHeader.FileSize, nEntryAlignment));
+		n32 nEntryAlignment = getAlignment(currentEntry.Path.substr(m_sDirName.size()));
+		currentEntry.Entry.Entry.File.FileOffset = static_cast<n32>(Align(m_DarcHeader.FileSize, nEntryAlignment));
 		m_DarcHeader.FileSize = currentEntry.Entry.Entry.File.FileOffset + currentEntry.Entry.Entry.File.FileSize;
 		if (m_DarcHeader.DataOffset == 0)
 		{
@@ -611,43 +591,46 @@ void CDarc::calculateFileOffset()
 	}
 }
 
-bool CDarc::matchInAlignList(const String& a_sPath)
+n32 CDarc::getAlignment(const UString& a_sPath) const
 {
-	bool bMatch = false;
-	for (auto it = m_vAlignList.begin(); it != m_vAlignList.end(); ++it)
+	for (map<n32, vector<URegex>>::const_reverse_iterator it = m_mUniqueAlignment.rbegin(); it != m_mUniqueAlignment.rend(); ++it)
 	{
-		if (regex_search(a_sPath, *it))
+		n32 nAlignment = it->first;
+		const vector<URegex>& vRegex = it->second;
+		for (vector<URegex>::const_iterator itRegex = vRegex.begin(); itRegex != vRegex.end(); ++itRegex)
 		{
-			bMatch = true;
-			break;
+			if (regex_search(a_sPath, *itRegex))
+			{
+				return nAlignment;
+			}
 		}
 	}
-	return bMatch;
+	return m_nSharedAlignment;
 }
 
 void CDarc::writeHeader()
 {
-	FFseek(m_fpDarc, 0, SEEK_SET);
+	Fseek(m_fpDarc, 0, SEEK_SET);
 	fwrite(&m_DarcHeader, sizeof(m_DarcHeader), 1, m_fpDarc);
 }
 
 void CDarc::writeEntry()
 {
-	FFseek(m_fpDarc, m_DarcHeader.EntryOffset, SEEK_SET);
-	for (auto it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
+	Fseek(m_fpDarc, m_DarcHeader.EntryOffset, SEEK_SET);
+	for (vector<SEntry>::const_iterator it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
 	{
-		SEntry& currentEntry = *it;
+		const SEntry& currentEntry = *it;
 		fwrite(&currentEntry.Entry, sizeof(currentEntry.Entry), 1, m_fpDarc);
 	}
-	fwrite(&*m_vEntryName.begin(), sizeof(char16_t), m_vEntryName.size(), m_fpDarc);
+	fwrite(&*m_vEntryName.begin(), 2, m_vEntryName.size(), m_fpDarc);
 }
 
 bool CDarc::writeData()
 {
 	bool bResult = true;
-	for (auto it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
+	for (vector<SEntry>::const_iterator it = m_vCreateEntry.begin(); it != m_vCreateEntry.end(); ++it)
 	{
-		SEntry& currentEntry = *it;
+		const SEntry& currentEntry = *it;
 		if (!currentEntry.IsDir)
 		{
 			if (!writeFromFile(currentEntry.Path, currentEntry.Entry.Entry.File.FileOffset, currentEntry.Entry.Entry.File.FileSize))
@@ -659,19 +642,19 @@ bool CDarc::writeData()
 	return bResult;
 }
 
-bool CDarc::writeFromFile(const String& a_sPath, n32 a_nOffset, n32 a_nSize)
+bool CDarc::writeFromFile(const UString& a_sPath, n32 a_nOffset, n32 a_nSize)
 {
-	FILE* fp = FFopenUnicode(a_sPath.c_str(), STR("rb"));
+	FILE* fp = UFopen(a_sPath.c_str(), USTR("rb"));
 	if (fp == nullptr)
 	{
 		return false;
 	}
 	if (m_bVerbose)
 	{
-		FPrintf(STR("load: %s\n"), a_sPath.c_str());
+		UPrintf(USTR("load: %") PRIUS USTR("\n"), a_sPath.c_str());
 	}
-	FFseek(m_fpDarc, a_nOffset, SEEK_SET);
-	FCopyFile(m_fpDarc, fp, 0, a_nSize);
+	Fseek(m_fpDarc, a_nOffset, SEEK_SET);
+	CopyFile(m_fpDarc, fp, 0, a_nSize);
 	fclose(fp);
 	return true;
 }
