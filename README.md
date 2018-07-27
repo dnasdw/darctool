@@ -5,6 +5,7 @@ A tool for extracting/creating darc file.
 ## History
 
 - v1.1.0 @ 2018.01.03 - A new beginning
+- v1.1.1 @ 2018.07.27 - Update cmake
 
 ### v1.0
 
@@ -28,16 +29,16 @@ A tool for extracting/creating darc file.
 
 - make 64-bit version
 ~~~
-mkdir project
-cd project
+mkdir build
+cd build
 cmake ..
 make
 ~~~
 
 - make 32-bit version
 ~~~
-mkdir project
-cd project
+mkdir build
+cd build
 cmake -DBUILD64=OFF ..
 make
 ~~~
