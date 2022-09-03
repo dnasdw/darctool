@@ -10,6 +10,7 @@ CDarcTool::SOption CDarcTool::s_Option[] =
 	{ USTR("shared-alignment"), USTR('a'), USTR("the shared alignment, default is 32") },
 	{ USTR("unique-alignment"), USTR('r'), USTR("the path regex pattern and the unique alignment") },
 	{ USTR("exclude-root"), USTR('e'), USTR("exclude the root dot dir") },
+	{ USTR("use-header-size"), 0, USTR("use header size instead of data offset") },
 	{ USTR("verbose"), USTR('v'), USTR("show the info") },
 	{ USTR("help"), USTR('h'), USTR("show this help") },
 	{ nullptr, 0, nullptr }
@@ -19,6 +20,7 @@ CDarcTool::CDarcTool()
 	: m_eAction(kActionNone)
 	, m_nSharedAlignment(32)
 	, m_bExcludeRoot(false)
+	, m_bUseHeaderSize(false)
 	, m_bVerbose(false)
 {
 }
@@ -134,6 +136,7 @@ int CDarcTool::Help()
 	UPrintf(USTR("  darctool -cvfd output.darc inputdir\n"));
 	UPrintf(USTR("  darctool -cvfd output.darc inputdir -a 4 -r \\.bclim 128 -r \\.bcfnt 128 -r \\.bcfna 128\n"));
 	UPrintf(USTR("  darctool -cvfd output.darc inputdir --exclude-root\n"));
+	UPrintf(USTR("  darctool -cvfd output.darc inputdir --use-header-size\n"));
 	UPrintf(USTR("\n"));
 	UPrintf(USTR("option:\n"));
 	SOption* pOption = s_Option;
@@ -276,6 +279,10 @@ CDarcTool::EParseOptionReturn CDarcTool::parseOptions(const UChar* a_pName, int&
 	{
 		m_bExcludeRoot = true;
 	}
+	else if (UCscmp(a_pName, USTR("use-header-size")) == 0)
+	{
+		m_bUseHeaderSize = true;
+	}
 	else if (UCscmp(a_pName, USTR("verbose")) == 0)
 	{
 		m_bVerbose = true;
@@ -287,13 +294,13 @@ CDarcTool::EParseOptionReturn CDarcTool::parseOptions(const UChar* a_pName, int&
 	return kParseOptionReturnSuccess;
 }
 
-CDarcTool::EParseOptionReturn CDarcTool::parseOptions(int a_nKey, int& a_nIndex, int m_nArgc, UChar* a_pArgv[])
+CDarcTool::EParseOptionReturn CDarcTool::parseOptions(int a_nKey, int& a_nIndex, int a_nArgc, UChar* a_pArgv[])
 {
 	for (SOption* pOption = s_Option; pOption->Name != nullptr || pOption->Key != 0 || pOption->Doc != nullptr; pOption++)
 	{
 		if (pOption->Key == a_nKey)
 		{
-			return parseOptions(pOption->Name, a_nIndex, m_nArgc, a_pArgv);
+			return parseOptions(pOption->Name, a_nIndex, a_nArgc, a_pArgv);
 		}
 	}
 	return kParseOptionReturnIllegalOption;
@@ -316,6 +323,7 @@ bool CDarcTool::createFile()
 	darc.SetSharedAlignment(m_nSharedAlignment);
 	darc.SetUniqueAlignment(m_mUniqueAlignment);
 	darc.SetExcludeRoot(m_bExcludeRoot);
+	darc.SetUseHeaderSize(m_bUseHeaderSize);
 	darc.SetVerbose(m_bVerbose);
 	return darc.CreateFile();
 }

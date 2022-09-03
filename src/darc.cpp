@@ -6,6 +6,7 @@ const n32 CDarc::s_nInvalidOffset = -1;
 CDarc::CDarc()
 	: m_nSharedAlignment(32)
 	, m_bExcludeRoot(false)
+	, m_bUseHeaderSize(false)
 	, m_bVerbose(false)
 	, m_fpDarc(nullptr)
 	, m_nEntryCount(0)
@@ -42,6 +43,11 @@ void CDarc::SetExcludeRoot(bool a_bExcludeRoot)
 	m_bExcludeRoot = a_bExcludeRoot;
 }
 
+void CDarc::SetUseHeaderSize(bool a_bUseHeaderSize)
+{
+	m_bUseHeaderSize = a_bUseHeaderSize;
+}
+
 void CDarc::SetVerbose(bool a_bVerbose)
 {
 	m_bVerbose = a_bVerbose;
@@ -50,7 +56,7 @@ void CDarc::SetVerbose(bool a_bVerbose)
 bool CDarc::ExtractFile()
 {
 	bool bResult = true;
-	m_fpDarc = UFopen(m_sFileName.c_str(), USTR("rb"));
+	m_fpDarc = UFopen(m_sFileName, USTR("rb"));
 	if (m_fpDarc == nullptr)
 	{
 		return false;
@@ -106,7 +112,7 @@ bool CDarc::CreateFile()
 	redirectSiblingDirOffset();
 	createEntryName();
 	calculateFileOffset();
-	m_fpDarc = UFopen(m_sFileName.c_str(), USTR("wb"));
+	m_fpDarc = UFopen(m_sFileName, USTR("wb"));
 	if (m_fpDarc == nullptr)
 	{
 		return false;
@@ -124,7 +130,7 @@ bool CDarc::CreateFile()
 
 bool CDarc::IsDarcFile(const UString& a_sFileName)
 {
-	FILE* fp = UFopen(a_sFileName.c_str(), USTR("rb"));
+	FILE* fp = UFopen(a_sFileName, USTR("rb"));
 	if (fp == nullptr)
 	{
 		return false;
@@ -173,7 +179,7 @@ bool CDarc::extractDirEntry()
 		{
 			UPrintf(USTR("save: %") PRIUS USTR("\n"), sDirName.c_str());
 		}
-		if (!UMakeDir(sDirName.c_str()))
+		if (!UMakeDir(sDirName))
 		{
 			m_sExtractStack.pop();
 			return false;
@@ -223,7 +229,7 @@ bool CDarc::extractFileEntry()
 	if (current.ExtractState == kExtractStateBegin)
 	{
 		UString sPath = m_sDirName + current.Prefix + current.EntryName;
-		FILE* fp = UFopen(sPath.c_str(), USTR("wb"));
+		FILE* fp = UFopen(sPath, USTR("wb"));
 		if (fp == nullptr)
 		{
 			bResult = false;
@@ -270,7 +276,7 @@ void CDarc::buildIgnoreList()
 {
 	m_vIgnoreList.clear();
 	UString sIgnorePath = UGetModuleDirName() + USTR("/ignore_darctool.txt");
-	FILE* fp = UFopen(sIgnorePath.c_str(), USTR("rb"));
+	FILE* fp = UFopen(sIgnorePath, USTR("rb"));
 	if (fp != nullptr)
 	{
 		Fseek(fp, 0, SEEK_END);
@@ -559,6 +565,10 @@ void CDarc::createEntryName()
 	}
 	m_DarcHeader.EntrySize = static_cast<u32>(m_vCreateEntry.size() * sizeof(SCommonEntry) + m_vEntryName.size() * 2);
 	m_DarcHeader.FileSize = static_cast<u32>(Align(m_DarcHeader.EntryOffset + m_DarcHeader.EntrySize, 4));
+	if (m_bUseHeaderSize)
+	{
+		m_DarcHeader.DataOffset = m_DarcHeader.FileSize;
+	}
 }
 
 void CDarc::calculateFileOffset()
@@ -644,7 +654,7 @@ bool CDarc::writeData()
 
 bool CDarc::writeFromFile(const UString& a_sPath, n32 a_nOffset, n32 a_nSize)
 {
-	FILE* fp = UFopen(a_sPath.c_str(), USTR("rb"));
+	FILE* fp = UFopen(a_sPath, USTR("rb"));
 	if (fp == nullptr)
 	{
 		return false;

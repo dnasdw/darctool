@@ -45,6 +45,7 @@ private:
 	n32 m_nSharedAlignment;
 	map<n32, vector<URegex>> m_mUniqueAlignment;
 	bool m_bExcludeRoot;
+	bool m_bUseHeaderSize;
 	bool m_bVerbose;
 	UString m_sMessage;
 };

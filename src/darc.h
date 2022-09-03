@@ -78,6 +78,7 @@ public:
 	void SetSharedAlignment(n32 a_nSharedAlignment);
 	void SetUniqueAlignment(const map<n32, vector<URegex>>& a_mUniqueAlignment);
 	void SetExcludeRoot(bool a_bExcludeRoot);
+	void SetUseHeaderSize(bool a_bUseHeaderSize);
 	void SetVerbose(bool a_bVerbose);
 	bool ExtractFile();
 	bool CreateFile();
@@ -110,6 +111,7 @@ private:
 	n32 m_nSharedAlignment;
 	map<n32, vector<URegex>> m_mUniqueAlignment;
 	bool m_bExcludeRoot;
+	bool m_bUseHeaderSize;
 	bool m_bVerbose;
 	FILE* m_fpDarc;
 	SDarcHeader m_DarcHeader;
