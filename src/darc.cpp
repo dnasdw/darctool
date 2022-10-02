@@ -348,7 +348,7 @@ bool CDarc::insertFileEntry(n32 a_nEntryOffset, const UString& a_sEntryName, n32
 	currentEntry.Entry.NameOffset = s_nInvalidOffset;
 	currentEntry.Entry.Entry.File.FileOffset = s_nInvalidOffset;
 	n64 nFileSize = 0;
-	if (!UGetFileSize(currentEntry.Path.c_str(), nFileSize))
+	if (!UGetFileSize(currentEntry.Path, nFileSize))
 	{
 		bResult = false;
 		UPrintf(USTR("ERROR: %") PRIUS USTR(" stat error\n\n"), currentEntry.Path.c_str());
